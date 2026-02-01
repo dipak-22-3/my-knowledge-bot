@@ -2,13 +2,15 @@ import streamlit as st
 import tempfile
 import os
 
-# Imports
+# --- Imports ---
 from langchain_community.document_loaders import PyPDFLoader, TextLoader
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from huggingface_hub import InferenceClient
-from langchain.docstore.document import Document
+
+# FIX: Updated import for Document
+from langchain_core.documents import Document
 
 # OCR Imports
 import pytesseract
