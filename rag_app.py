@@ -87,7 +87,7 @@ def get_gemini_response(question, vector_store):
         context = "\n\n".join([doc.page_content for doc in relevant_docs])
         
         # 2. Gemini se poocho
-        llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", temperature=0.3, google_api_key=api_key)
+        llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0.3, google_api_key=api_key)
         
         prompt = f"""You are a helpful assistant. Use the Context below to answer the user's question.
         If the answer is not in the context, say "I don't know based on this document."
