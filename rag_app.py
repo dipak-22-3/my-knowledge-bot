@@ -44,9 +44,10 @@ with st.sidebar:
     # Model Selection
     model_id = st.selectbox(
         "Select LLM",
-        ["mistralai/Mistral-7B-Instruct-v0.3", "tiiuae/falcon-7b-instruct", "google/flan-t5-large"],
+        ["google/flan-t5-large", "mistralai/Mistral-7B-Instruct-v0.3", "tiiuae/falcon-7b-instruct"],
         index=0
     )
+    st.caption("Note: Mistral requires accepting the license on HuggingFace.co. Flan-T5 is the safest for testing.")
     
     st.divider()
     
@@ -90,7 +91,15 @@ def get_llm_response(prompt, context, api_key, repo_id):
         )
         return response
     except Exception as e:
-        return f"Error contacting API: {str(e)}"
+        error_msg = str(e)
+        if "401" in error_msg:
+            return "🚨 Error: Invalid API Token. Please check your token in the sidebar."
+        elif "403" in error_msg:
+            return f"🚨 Error: Permission Denied for model '{repo_id}'. You may need to accept the license on HuggingFace.co or switch to 'google/flan-t5-large'."
+        elif "503" in error_msg:
+            return "⏳ Error: The model is loading. Please wait 30 seconds and try again."
+        else:
+            return f"Error contacting API: {error_msg}"
 
 def ocr_pdf(file_path):
     """
