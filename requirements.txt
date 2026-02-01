@@ -7,3 +7,6 @@ faiss-cpu
 pypdf
 huggingface_hub
 sentence-transformers
+pytesseract
+pdf2image
+pillow
