@@ -1,12 +1,7 @@
 streamlit
-langchain
+google-generativeai
+langchain-google-genai
 langchain-community
-langchain-huggingface
-langchain-text-splitters
 faiss-cpu
 pypdf
-huggingface_hub
-sentence-transformers
-pytesseract
-pdf2image
-pillow
+python-dotenv
