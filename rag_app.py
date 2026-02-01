@@ -5,14 +5,16 @@ from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_community.document_loaders import PyPDFLoader, TextLoader
 from langchain_community.vectorstores import FAISS
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+
+# FIX: Updated Import Path
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+
 import tempfile
 
 # --- Page Config ---
 st.set_page_config(page_title="Gemini RAG Bot", page_icon="🤖")
 
 # --- 1. API Key Setup (Automatic) ---
-# Yeh line automatically Streamlit Secrets se key uthayegi
 try:
     api_key = st.secrets["GOOGLE_API_KEY"]
     genai.configure(api_key=api_key)
