@@ -9,7 +9,7 @@ from langchain_community.vectorstores import FAISS
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from huggingface_hub import InferenceClient
 
-# FIX: Updated import for Document
+# Document Import
 from langchain_core.documents import Document
 
 # OCR Imports
@@ -19,39 +19,51 @@ from PIL import Image
 
 # --- Page Configuration ---
 st.set_page_config(
-    page_title="Personal Knowledge Assistant (+OCR)",
+    page_title="Personal Knowledge Assistant",
     page_icon="🧠",
     layout="wide"
 )
 
-# --- Session State Initialization ---
+# --- Session State ---
 if "messages" not in st.session_state:
     st.session_state.messages = []
 if "vector_store" not in st.session_state:
     st.session_state.vector_store = None
 
-# --- Sidebar: Configuration & Upload ---
+# --- Sidebar ---
 with st.sidebar:
     st.title("⚙️ Setup")
     
-    # API Key Input
     hf_api_token = st.text_input(
         "Hugging Face API Token",
         type="password",
         help="Get your free token from https://huggingface.co/settings/tokens"
     )
+
+    # Add a connection test button
+    if hf_api_token:
+        if st.button("🔌 Test Connection"):
+            try:
+                client = InferenceClient(token=hf_api_token)
+                # Simple test
+                client.text_generation("Hello", model="google/flan-t5-large")
+                st.success("✅ Connected successfully!")
+            except Exception as e:
+                st.error(f"❌ Connection failed: {e}")
     
-    # Model Selection
+    # Recommended model first
     model_id = st.selectbox(
         "Select LLM",
-        ["google/flan-t5-large", "mistralai/Mistral-7B-Instruct-v0.3", "tiiuae/falcon-7b-instruct"],
+        [
+            "google/flan-t5-large", # Most reliable free model
+            "mistralai/Mistral-7B-Instruct-v0.3", # Good but needs license
+            "tiiuae/falcon-7b-instruct"
+        ],
         index=0
     )
-    st.caption("Note: Mistral requires accepting the license on HuggingFace.co. Flan-T5 is the safest for testing.")
     
     st.divider()
     
-    # File Uploader
     uploaded_files = st.file_uploader(
         "Upload Documents (PDF, TXT)", 
         type=["pdf", "txt"], 
@@ -60,68 +72,48 @@ with st.sidebar:
     
     process_btn = st.button("Ingest Documents")
 
-# --- Helper Functions ---
+# --- Logic ---
 
 def get_llm_response(prompt, context, api_key, repo_id):
-    """
-    Query the Hugging Face Inference API.
-    """
     client = InferenceClient(token=api_key)
     
+    # Simplified prompt to save tokens
     full_prompt = f"""
-    You are a helpful Knowledge Assistant. Use the provided context to answer the question.
-    If the answer is not in the context, say "I couldn't find a reliable source for that in your documents."
+    Use the Context below to answer the Question. If the answer isn't there, say "I don't know".
     
-    CONTEXT:
+    Context:
     {context}
     
-    QUESTION:
-    {prompt}
+    Question: {prompt}
     
-    ANSWER (Cite specific documents if possible):
+    Answer:
     """
     
     try:
         response = client.text_generation(
             prompt=full_prompt,
             model=repo_id,
-            max_new_tokens=512,
+            max_new_tokens=250, # Reduced to prevent timeouts
             temperature=0.1,
             return_full_text=False
         )
         return response
     except Exception as e:
-        error_msg = str(e)
-        if "401" in error_msg:
-            return "🚨 Error: Invalid API Token. Please check your token in the sidebar."
-        elif "403" in error_msg:
-            return f"🚨 Error: Permission Denied for model '{repo_id}'. You may need to accept the license on HuggingFace.co or switch to 'google/flan-t5-large'."
-        elif "503" in error_msg:
-            return "⏳ Error: The model is loading. Please wait 30 seconds and try again."
-        else:
-            return f"Error contacting API: {error_msg}"
+        # RETURN THE ACTUAL ERROR for debugging
+        return f"ERROR_DETAILS: {str(e)}"
 
 def ocr_pdf(file_path):
-    """
-    Fallback function: Converts PDF pages to images and extracts text using Tesseract.
-    """
     text_content = ""
     try:
-        # Convert PDF to images
         images = convert_from_path(file_path)
-        for i, image in enumerate(images):
-            # Extract text from image
+        for image in images:
             page_text = pytesseract.image_to_string(image)
             text_content += page_text + "\n"
     except Exception as e:
-        st.error(f"OCR Error: {e}")
         return ""
     return text_content
 
 def process_documents(files):
-    """
-    Load, chunk, and embed documents (with OCR fallback).
-    """
     documents = []
     status_text = st.empty()
     status_text.info("Reading files...")
@@ -132,36 +124,28 @@ def process_documents(files):
             tmp_file_path = tmp_file.name
             
         try:
-            # 1. Try Standard Loading First (Fast)
             if uploaded_file.name.endswith(".pdf"):
                 loader = PyPDFLoader(tmp_file_path)
                 docs = loader.load()
                 
-                # Check if standard loading returned empty text
-                total_text_length = sum([len(d.page_content.strip()) for d in docs])
-                
-                # 2. If text is empty/very short, trigger OCR (Slow but effective)
-                if total_text_length < 50: 
-                    st.warning(f"⚠️ '{uploaded_file.name}' seems to be a scanned image. Starting OCR (this allows reading images but takes longer)...")
+                # Check for scan
+                total_len = sum([len(d.page_content.strip()) for d in docs])
+                if total_len < 50: 
+                    st.warning(f"⚠️ Scanned PDF detected: {uploaded_file.name}. Running OCR...")
                     ocr_text = ocr_pdf(tmp_file_path)
                     if ocr_text.strip():
-                        # Create a new Document object from OCR text
                         docs = [Document(page_content=ocr_text, metadata={"source": uploaded_file.name, "type": "ocr"})]
-                    else:
-                        st.error(f"Failed to extract text from {uploaded_file.name} even with OCR.")
             else:
                 loader = TextLoader(tmp_file_path)
                 docs = loader.load()
                 
-            # Add metadata
             for doc in docs:
                 if 'source' not in doc.metadata:
                     doc.metadata['source'] = uploaded_file.name
                 
             documents.extend(docs)
-            
         except Exception as e:
-            st.error(f"Error processing {uploaded_file.name}: {e}")
+            st.error(f"Error: {e}")
         finally:
             if os.path.exists(tmp_file_path):
                 os.remove(tmp_file_path)
@@ -169,83 +153,86 @@ def process_documents(files):
     if not documents:
         return None
 
-    status_text.info("Chunking text...")
+    status_text.info("Chunking...")
     
+    # Smaller chunks for reliability
     text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=1000,
-        chunk_overlap=200,
-        separators=["\n\n", "\n", ".", " ", ""]
+        chunk_size=800,
+        chunk_overlap=100
     )
     splits = text_splitter.split_documents(documents)
     
     if not splits:
-        st.error("Documents were empty after processing.")
+        st.error("No text found.")
         return None
     
-    status_text.info(f"Generating embeddings for {len(splits)} chunks...")
+    status_text.info("Embedding...")
     
     try:
         embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
         vector_store = FAISS.from_documents(splits, embeddings)
-        status_text.success("Ingestion Complete! You can now chat.")
+        status_text.success("Ready!")
         return vector_store
     except Exception as e:
-        st.error(f"Error generating embeddings: {e}")
+        st.error(f"Embedding Error: {e}")
         return None
 
-# --- Main Logic ---
+# --- UI ---
 
-st.header("🧠 Personal Knowledge Assistant (+OCR)")
-st.caption("Ask questions based on your uploaded documents (Scans supported).")
+st.header("🧠 Personal Knowledge Assistant")
 
 if process_btn and uploaded_files:
-    with st.spinner("Processing knowledge base..."):
+    with st.spinner("Processing..."):
         st.session_state.vector_store = process_documents(uploaded_files)
 
-if st.session_state.vector_store is None:
-    st.info("👈 Please upload documents and click 'Ingest Documents' to start.")
-else:
+if st.session_state.vector_store:
+    # Chat History
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
             if "sources" in message:
-                with st.expander("📚 View Sources"):
-                    for idx, source in enumerate(message["sources"]):
-                        st.markdown(f"**Source {idx+1} ({source['source']}):**")
-                        st.caption(source['content'])
+                with st.expander("Sources"):
+                    for s in message["sources"]:
+                        st.caption(f"{s['source']}: {s['content']}")
 
-    if prompt := st.chat_input("Ask a question about your documents..."):
+    # Input
+    if prompt := st.chat_input("Ask a question..."):
         if not hf_api_token:
-            st.error("Please enter a Hugging Face API Token in the sidebar.")
+            st.error("❌ Key missing!")
         else:
             st.session_state.messages.append({"role": "user", "content": prompt})
             with st.chat_message("user"):
                 st.markdown(prompt)
 
             with st.chat_message("assistant"):
-                with st.spinner("Retrieving context & generating answer..."):
-                    retriever = st.session_state.vector_store.as_retriever(search_kwargs={"k": 3})
+                with st.spinner("Thinking..."):
+                    # Retrieve only TOP 2 to save space
+                    retriever = st.session_state.vector_store.as_retriever(search_kwargs={"k": 2})
                     relevant_docs = retriever.invoke(prompt)
-                    context_text = "\n\n".join([doc.page_content for doc in relevant_docs])
+                    
+                    context_text = "\n\n".join([d.page_content for d in relevant_docs])
+                    
                     response_text = get_llm_response(prompt, context_text, hf_api_token, model_id)
                     
-                    st.markdown(response_text)
-                    
-                    sources_data = [
-                        {"source": doc.metadata.get('source', 'Unknown'), "content": doc.page_content[:300] + "..."}
-                        for doc in relevant_docs
-                    ]
-                    
-                    with st.expander("📚 View Sources & Confidence"):
-                        for idx, doc in enumerate(relevant_docs):
-                            src_label = doc.metadata.get('source', 'Unknown')
-                            if doc.metadata.get('type') == 'ocr':
-                                src_label += " (OCR Scanned)"
-                            st.markdown(f"**Source {idx+1}**: *{src_label}*")
-                            st.caption(doc.page_content)
-
-            st.session_state.messages.append({
-                "role": "assistant", 
-                "content": response_text,
-                "sources": sources_data
-            })
+                    # Error Handling in UI
+                    if "ERROR_DETAILS" in response_text:
+                        st.error("API Error encountered:")
+                        st.code(response_text)
+                        st.info("Tip: Try switching to 'google/flan-t5-large' in the sidebar.")
+                    else:
+                        st.markdown(response_text)
+                        
+                        sources_data = [
+                            {"source": doc.metadata.get('source', 'Unknown'), "content": doc.page_content[:200] + "..."}
+                            for doc in relevant_docs
+                        ]
+                        
+                        st.session_state.messages.append({
+                            "role": "assistant", 
+                            "content": response_text,
+                            "sources": sources_data
+                        })
+                        
+                        with st.expander("Sources"):
+                            for s in sources_data:
+                                st.caption(f"{s['source']}: {s['content']}")
