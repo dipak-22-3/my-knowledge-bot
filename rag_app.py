@@ -1,11 +1,13 @@
 import streamlit as st
+import tempfile
+import os
+
+# Updated Imports for newer LangChain versions
 from langchain_community.document_loaders import PyPDFLoader, TextLoader
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from huggingface_hub import InferenceClient
-import tempfile
-import os
 
 # --- Page Configuration ---
 st.set_page_config(
@@ -76,7 +78,7 @@ def get_llm_response(prompt, context, api_key, repo_id):
             prompt=full_prompt,
             model=repo_id,
             max_new_tokens=512,
-            temperature=0.3, # Low temperature for factual grounding
+            temperature=0.1, # Low temperature for factual grounding
             return_full_text=False
         )
         return response
@@ -130,7 +132,6 @@ def process_documents(files):
     status_text.info(f"Generating embeddings for {len(splits)} chunks... (This may take a moment)")
     
     # Embeddings - Using a lightweight, high-performance model
-    # sentence-transformers/all-MiniLM-L6-v2 is fast and good for RAG
     embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
     
     # Vector Store - FAISS
