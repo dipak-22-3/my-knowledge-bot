@@ -2,7 +2,7 @@ import streamlit as st
 import tempfile
 import os
 
-# Updated Imports for newer LangChain versions
+# Imports
 from langchain_community.document_loaders import PyPDFLoader, TextLoader
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
@@ -113,10 +113,22 @@ def process_documents(files):
                 doc.metadata['source'] = uploaded_file.name
                 
             documents.extend(docs)
+        except Exception as e:
+            st.error(f"Error reading {uploaded_file.name}: {e}")
         finally:
             os.remove(tmp_file_path)
             
+    # SAFETY CHECK 1: Did we load anything?
     if not documents:
+        st.warning("No documents loaded.")
+        return None
+
+    # SAFETY CHECK 2: Do the documents actually contain text?
+    # This filters out empty pages or scanned images without OCR
+    documents = [doc for doc in documents if doc.page_content.strip()]
+    
+    if not documents:
+        st.error("⚠️ No text could be extracted. If you uploaded a PDF, it might be a scanned image (picture) which cannot be read without OCR.")
         return None
 
     status_text.info("Chunking text...")
@@ -129,16 +141,25 @@ def process_documents(files):
     )
     splits = text_splitter.split_documents(documents)
     
+    # SAFETY CHECK 3: Did chunking result in actual splits?
+    if not splits:
+        st.error("Documents were empty after processing.")
+        return None
+    
     status_text.info(f"Generating embeddings for {len(splits)} chunks... (This may take a moment)")
     
-    # Embeddings - Using a lightweight, high-performance model
-    embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
-    
-    # Vector Store - FAISS
-    vector_store = FAISS.from_documents(splits, embeddings)
-    
-    status_text.success("Ingestion Complete! You can now chat.")
-    return vector_store
+    try:
+        # Embeddings - Using a lightweight, high-performance model
+        embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+        
+        # Vector Store - FAISS
+        vector_store = FAISS.from_documents(splits, embeddings)
+        
+        status_text.success("Ingestion Complete! You can now chat.")
+        return vector_store
+    except Exception as e:
+        st.error(f"Error generating embeddings: {e}")
+        return None
 
 # --- Main Logic ---
 
