@@ -5,16 +5,13 @@ from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_community.document_loaders import PyPDFLoader, TextLoader
 from langchain_community.vectorstores import FAISS
-
-# FIX: Updated Import Path
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-
 import tempfile
 
 # --- Page Config ---
 st.set_page_config(page_title="Gemini RAG Bot", page_icon="🤖")
 
-# --- 1. API Key Setup (Automatic) ---
+# --- 1. API Key Setup & Validation ---
 try:
     api_key = st.secrets["GOOGLE_API_KEY"]
     genai.configure(api_key=api_key)
@@ -53,44 +50,58 @@ def get_vector_store(uploaded_files):
                 
                 documents.extend(docs)
             except Exception as e:
-                st.error(f"Error reading {uploaded_file.name}: {e}")
+                st.write(f"⚠️ Error reading {uploaded_file.name}: {e}")
             finally:
                 os.remove(tmp_path)
 
         if not documents:
             return None
 
-        # Chunks banao
+        status.write("Chunking text...")
         splits = text_splitter.split_documents(documents)
         
-        # Google Embeddings (Free & Fast)
-        embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001", google_api_key=api_key)
+        status.write("Creating Embeddings (This connects to Google)...")
         
-        # Vector DB create karo
-        vector_store = FAISS.from_documents(splits, embeddings)
-        status.update(label="✅ Knowledge Base Ready!", state="complete", expanded=False)
-        return vector_store
+        try:
+            # FIX: Using the newer, more stable embedding model
+            embeddings = GoogleGenerativeAIEmbeddings(
+                model="models/text-embedding-004", 
+                google_api_key=api_key
+            )
+            
+            # Vector DB create karo
+            vector_store = FAISS.from_documents(splits, embeddings)
+            status.update(label="✅ Knowledge Base Ready!", state="complete", expanded=False)
+            return vector_store
+            
+        except Exception as e:
+            st.error(f"❌ Google API Error: {str(e)}")
+            st.info("💡 Tip: Check if your API Key is correct in Streamlit Secrets.")
+            return None
 
 def get_gemini_response(question, vector_store):
-    # 1. Context dhoondo
-    retriever = vector_store.as_retriever(search_kwargs={"k": 3})
-    relevant_docs = retriever.invoke(question)
-    context = "\n\n".join([doc.page_content for doc in relevant_docs])
-    
-    # 2. Gemini se poocho
-    llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", temperature=0.3, google_api_key=api_key)
-    
-    prompt = f"""You are a helpful assistant. Use the Context below to answer the user's question.
-    If the answer is not in the context, say "I don't know based on this document."
-    
-    Context:
-    {context}
-    
-    Question: {question}
-    """
-    
-    response = llm.invoke(prompt)
-    return response.content, relevant_docs
+    try:
+        # 1. Context dhoondo
+        retriever = vector_store.as_retriever(search_kwargs={"k": 3})
+        relevant_docs = retriever.invoke(question)
+        context = "\n\n".join([doc.page_content for doc in relevant_docs])
+        
+        # 2. Gemini se poocho
+        llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", temperature=0.3, google_api_key=api_key)
+        
+        prompt = f"""You are a helpful assistant. Use the Context below to answer the user's question.
+        If the answer is not in the context, say "I don't know based on this document."
+        
+        Context:
+        {context}
+        
+        Question: {question}
+        """
+        
+        response = llm.invoke(prompt)
+        return response.content, relevant_docs
+    except Exception as e:
+        return f"Error getting answer: {str(e)}", []
 
 # --- UI Layout ---
 st.title("🤖 Personal Knowledge Bot (Gemini)")
@@ -124,9 +135,10 @@ if st.session_state.vector_store:
                 st.markdown(answer)
                 
                 # Sources dikhao
-                with st.expander("View Sources"):
-                    for doc in sources:
-                        st.caption(f"📄 {doc.metadata['source']}: {doc.page_content[:100]}...")
+                if sources:
+                    with st.expander("View Sources"):
+                        for doc in sources:
+                            st.caption(f"📄 {doc.metadata['source']}: {doc.page_content[:100]}...")
         
         st.session_state.messages.append({"role": "assistant", "content": answer})
 
